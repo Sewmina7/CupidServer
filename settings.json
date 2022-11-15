@@ -1,7 +1,7 @@
 {
     "port":1601,
     "password":"xyz@123",
-    "game_exe":"/home/game/game.x86_64",
+    "game_exe":"/root/Unity/CupidSample/Builds/Linux/Cupid.x86_64",
     "minimum_players": 2,
     "maximum_players": 5,
     "waiting_time": 60000,
