@@ -28,7 +28,7 @@ app.get('/settings',(req,res)=>{
     res.send(m_settings);
 })
 app.get('/', (req, res) => {
-    
+    //Validate request
     var username = req.query.username ?? "";
     var password = req.query.password ?? "";
     if (password != settings.password) {
@@ -40,18 +40,17 @@ app.get('/', (req, res) => {
         res.send("Bad credentials");
         return;
     }
-    // res.send('1')
+    //Phase 1 : Select expired rooms
     var myRoomId = -1;
     var possibleRoomId = -1;
     var expiredRooms = [];
-
-    //TODO: Make this loop go backwards and remove the extra loop below
     for (var i = 0; i < Rooms.length; i++) {
 
-        if(Rooms[i].Players.length >= settings.minimum_players){
+        if(true){
+        // if(Rooms[i].Players.length >= settings.minimum_players){
             var expireDate = Rooms[i].Time + settings.waiting_time;
             var timeToLive = expireDate - Date.now();
-
+            console.log(timeToLive);
             if(timeToLive <0){
                 //expired
                 console.log(Rooms[i]);
@@ -62,6 +61,16 @@ app.get('/', (req, res) => {
                     console.log(Rooms[i].Port + " Port room will be expired in " + timeToLive);
                 }
                 // console.log("Room " + i + " will be expired  in " + expireDate + "-" + Date.now() + "=" + timeToLive);
+            }
+        }
+
+        if(myRoomId > -1){continue;}
+        if (Rooms[i].Players.indexOf(username) > -1) {
+            myRoomId = i;
+        } else {
+            if (Rooms[i].Players.length < settings.maximum_players) {
+                console.log("found possible room " + i);
+                possibleRoomId = i;
             }
         }
     }
@@ -76,24 +85,12 @@ app.get('/', (req, res) => {
         } 
     }
 
-    
-    for (var i = 0; i < Rooms.length; i++) {
-        if(myRoomId > -1){continue;}
-        if (Rooms[i].Players.indexOf(username) > -1) {
-            myRoomId = i;
-        } else {
-            if (Rooms[i].Players.length < settings.maximum_players) {
-                console.log("found possible room " + i);
-                possibleRoomId = i;
-            }
-        }
-    }
-
     if (myRoomId == -1) {
         if (possibleRoomId == -1) {
             Rooms.push({ Port: Helpers.GetRandomPort(settings.port_range_min, settings.port_range_max), Players: [username], Time: Date.now() })
             myRoomId= Rooms.length-1;
         } else {
+            // var newUser = {name:username, time:Date.now()};
             Rooms[possibleRoomId].Players.push(username);
         }
     }
@@ -141,6 +138,7 @@ app.get('/', (req, res) => {
             res.send("0," + Rooms[selectedRoomId].Port);
         }
     }
+    console.log(Date.now());
     console.log(Rooms);
 
 })

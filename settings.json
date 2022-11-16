@@ -4,7 +4,7 @@
     "game_exe":"/root/Unity/CupidSample/Builds/Linux/Cupid.x86_64",
     "minimum_players": 2,
     "maximum_players": 5,
-    "waiting_time": 60000,
+    "waiting_time": 2000,
     "port_range_min":2000,
     "port_range_max":3000
 }
