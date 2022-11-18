@@ -1,4 +1,6 @@
-console.log("Starting Cupid v1")
+const version = "v1.0";
+console.log("Starting Cupid Matchmaker for unity " + version);
+
 console.log("")
 const { response } = require('express');
 const { exec, execFile } = require('child_process');
@@ -9,16 +11,18 @@ require('./settings')();
 const Helpers = require('./helpers');
 const { start } = require('repl');
 
+const queueGraceTime = 2000;
+
 
 //Read settings
 var settings = ReadSettings();
 if (settings == null) { return; }
-
-console.log(settings);
+const logLevel = settings.log_level;
+LogVerbose(settings);
 
 var Rooms = [];
+var Queue = [];
 
-// Rooms.push({Port:"2002",Players:["Player1","Player2"]})
 app.get('/settings',(req,res)=>{
     if(req.query.password != settings.password){
         res.send("403 Unauthorized")
@@ -27,120 +31,141 @@ app.get('/settings',(req,res)=>{
     var m_settings = {minimum_players:settings.minimum_players, maximum_players:settings.maximum_players, waiting_time:settings.waiting_time}
     res.send(m_settings);
 })
+
 app.get('/', (req, res) => {
+    var username = req.query.username ?? "";
+
+    if(!ValidateRequest(req,res)){
+        return;
+    }
+
+    //Check query
+    var joinedRoom = null;
+    var alreadyOnQueue = false;
+    Queue.forEach(element => {
+        if(element.Name == username){
+            element.LastSeen = Date.now();
+            alreadyOnQueue = true;
+        }else{
+            if(Date.now() - element.LastSeen > queueGraceTime){
+                Queue.pop(element);
+                Log(`Player ${element.Name} is afk, removing.`)
+            }
+        }
+    });
+    
+    //Check on rooms if not in the queue, Maybe they already joined a room
+    var possibleRoom=null;
+    
+    Rooms.forEach(element => {
+        var roomValid = true;
+        if(Date.now() - element.InitTime > settings.waiting_time){
+            //This room is expired
+            LogDebug("This room is expired, Removing now");
+            LogDebug(element);
+            Rooms.pop(element);
+            roomValid = false;
+        }
+        if(roomValid){
+            element.Players.forEach(player => {
+                if(player.Name == username){
+                    joinedRoom = element;
+                }
+            })
+            if(element.Players.length == 0){
+                Rooms.pop(element);
+            }else if(element.Players.length < settings.maximum_players){
+                possibleRoom = element;
+            }
+        }
+        
+    })    
+
+    if(joinedRoom != null){ //Already in a room. Stopping here
+        res.send(joinedRoom)                                                                    // <------- Exit  [ Already in a room ]
+        return;
+    }
+
+    //Neither in a room nor in queue, Let's see
+    if(possibleRoom == null){
+        if(Queue.length >= settings.minimum_players){
+            var newRoom = {Players:[{Name:username, LastSeen: Date.now()}], Port: Helpers.GetRandomPort(settings.port_range_min, settings.port_range_max), InitTime: Date.now()};
+            Rooms.push(newRoom);
+            res.send(newRoom);                                                                         // <------- Exit  [ Made a new room ]
+            return;
+        }
+    }else{
+        possibleRoom.Players.push({Name:username, LastSeen:Date.now()});
+        res.send(possibleRoom);                                                                      // <---------- Exit    [ joining an existing room ]
+        return;
+    }
+
+    //Not even got a new room. Back to queue
+    if(!alreadyOnQueue){
+        var newQueueEntry = {Name:username, LastSeen: Date.now()};
+        
+        LogVerbose(newQueueEntry);
+        Queue.push(newQueueEntry);
+    }
+    LogVerbose("Rooms");
+    Rooms.forEach(element=>{
+        LogVerbose(element);
+    })
+    LogVerbose("Queue");
+    LogVerbose(Queue);
+    res.send("0");                                                                                  // <---------- Exit     [ No room ]
+})
+
+app.get('/cancel', (req,res)=>{
+    var username = req.query.username ?? "";
+
+    if(!ValidateRequest(req,res)){
+        return;
+    }
+
+    Queue.forEach((element)=>{
+        if(element.Name == username){
+            Queue.pop(element);
+            res.send("1");
+            return;
+        }
+    })
+
+    res.send("Couldn't find user " + username + " in the queue");
+})
+
+function ValidateRequest(req, res){
     //Validate request
     var username = req.query.username ?? "";
     var password = req.query.password ?? "";
     if (password != settings.password) {
         res.send("403 Unauthorized");
-        console.log("Unauthorized call " + password + ":" + settings.password);
-        return;
+        LogVerbose("Unauthorized call " + password + ":" + settings.password);
+        return false;
     }
     if (username.length < 2) {
         res.send("Bad credentials");
-        return;
-    }
-    //Phase 1 : Select expired rooms
-    var myRoomId = -1;
-    var possibleRoomId = -1;
-    var expiredRooms = [];
-    for (var i = 0; i < Rooms.length; i++) {
-
-        if(true){
-        // if(Rooms[i].Players.length >= settings.minimum_players){
-            var expireDate = Rooms[i].Time + settings.waiting_time;
-            var timeToLive = expireDate - Date.now();
-            console.log(timeToLive);
-            if(timeToLive <0){
-                //expired
-                console.log(Rooms[i]);
-                console.log(" is expired.");
-                expiredRooms.push(i);
-            }else{
-                if(timeToLive < 4){
-                    console.log(Rooms[i].Port + " Port room will be expired in " + timeToLive);
-                }
-                // console.log("Room " + i + " will be expired  in " + expireDate + "-" + Date.now() + "=" + timeToLive);
-            }
-        }
-
-        if(myRoomId > -1){continue;}
-        if (Rooms[i].Players.indexOf(username) > -1) {
-            myRoomId = i;
-        } else {
-            if (Rooms[i].Players.length < settings.maximum_players) {
-                console.log("found possible room " + i);
-                possibleRoomId = i;
-            }
-        }
-    }
-    //Purge expired rooms
-    for(var i=expiredRooms.length-1; i>=0; i--){
-        Rooms.pop(expiredRooms[i]);
-        if(possibleRoomId == expiredRooms[i]){
-            possibleRoomId =-1;
-        }
-        if(myRoomId == expiredRooms[i]){
-            myRoomId =-1;
-        } 
+        return false;
     }
 
-    if (myRoomId == -1) {
-        if (possibleRoomId == -1) {
-            Rooms.push({ Port: Helpers.GetRandomPort(settings.port_range_min, settings.port_range_max), Players: [username], Time: Date.now() })
-            myRoomId= Rooms.length-1;
-        } else {
-            // var newUser = {name:username, time:Date.now()};
-            Rooms[possibleRoomId].Players.push(username);
-        }
+    return true;
+}
+
+function Log(msg){
+    console.log(msg);
+}
+
+function LogDebug(msg){
+    if(logLevel > 0){
+        console.log(msg);
     }
-    var selectedRoomId = -1;
-    if (myRoomId > -1) {
-        //M
-        selectedRoomId = myRoomId;
-    } else if (possibleRoomId > -1) {
-        selectedRoomId = possibleRoomId;
-    } else {
-        res.send("-1, Error!");
+}
+
+function LogVerbose(msg){
+    if(logLevel > 1){
+        console.log(msg);
     }
-
-    if (selectedRoomId > -1) {
-        if (Rooms[selectedRoomId].Players.length >= settings.minimum_players) {
-            res.send("1," + Rooms[selectedRoomId].Port);
-            //Spawn server instance
-            var arguments = ["-port", Rooms[selectedRoomId].Port];
-            console.log(arguments);
-            // execFile(settings.game_exe,arguments, {maxBuffer:1024 * 1000}, (err, stdout, stderr) => {
-            //     if (err) {
-            //         // node couldn't execute the command
-            //         console.log(err);
-            //         return;
-            //     }
-            //     console.log("game started correctly?");
-            //     // the *entire* stdout and stderr (buffered)
-            //     console.log(`stdout: ${stdout}`);
-            //     console.log(`stderr: ${stderr}`);
-            //   });
-            var child = spawn(settings.game_exe, arguments);
-
-            child.stdout.on('data', function (data) {
-            // console.log('stdout: ' + data);
-            });
-
-            child.stderr.on('data', function (data) {
-                console.log('stderr: ' + data);
-            });
-
-            child.on('close', function (code) {
-                console.log('child process exited with code ' + code);
-            });
-        } else {
-            res.send("0," + Rooms[selectedRoomId].Port);
-        }
-    }
-    console.log(Date.now());
-    console.log(Rooms);
-
-})
+}
 
 app.listen(settings.port);
+console.log("Listening on port " + settings.port);
