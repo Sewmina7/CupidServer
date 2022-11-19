@@ -3,8 +3,6 @@ console.log("Starting Cupid Matchmaker for unity " + version);
 
 console.log("")
 const { response } = require('express');
-const { exec, execFile } = require('child_process');
-var spawn = require('child_process').spawn;
 const express = require('express')
 const app = express()
 require('./settings')();
@@ -18,6 +16,7 @@ const queueGraceTime = 2000;
 var settings = ReadSettings();
 if (settings == null) { return; }
 const logLevel = settings.log_level;
+
 LogVerbose(settings);
 
 var Rooms = [];
@@ -89,8 +88,10 @@ app.get('/', (req, res) => {
     //Neither in a room nor in queue, Let's see
     if(possibleRoom == null){
         if(Queue.length >= settings.minimum_players){
-            var newRoom = {Players:[{Name:username, LastSeen: Date.now()}], Port: Helpers.GetRandomPort(settings.port_range_min, settings.port_range_max), InitTime: Date.now()};
+            var newPort = Helpers.GetRandomPort(settings.port_range_min, settings.port_range_max);
+            var newRoom = {Players:[{Name:username, LastSeen: Date.now()}], Port: newPort, InitTime: Date.now()};
             Rooms.push(newRoom);
+            Helpers.OpenGameInstance(settings.game_exe, newPort);
             res.send(newRoom);                                                                         // <------- Exit  [ Made a new room ]
             return;
         }
@@ -122,16 +123,18 @@ app.get('/cancel', (req,res)=>{
     if(!ValidateRequest(req,res)){
         return;
     }
-
+    var foundUser = false;
     Queue.forEach((element)=>{
         if(element.Name == username){
             Queue.pop(element);
             res.send("1");
+            foundUser=true;
             return;
         }
     })
-
-    res.send("Couldn't find user " + username + " in the queue");
+    if(!foundUser){
+        res.send("Couldn't find user " + username + " in the queue");
+    }
 })
 
 function ValidateRequest(req, res){
